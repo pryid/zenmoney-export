@@ -1,11 +1,9 @@
-name: zenmcp
-
 services:
     mcp:
-        image: "${ZENMCP_IMAGE:-zenmcp:local}"
+        image: "${ZENMCP_IMAGE:-localhost/zenmcp:local}"
         build:
             context: ..
-            dockerfile: docker/Dockerfile.zenmcp
+            dockerfile: podman/Containerfile.zenmcp
         pull_policy: "${ZENMCP_PULL_POLICY:-build}"
         init: true
         environment:
@@ -16,7 +14,8 @@ services:
             ZENMCP_LOG_LEVEL: "${ZENMCP_LOG_LEVEL:-info}"
             ZENMCP_AUTH_MODE: bearer
             # Supply a random secret of at least 32 bytes through the shell or an ignored local env file.
-            ZENMCP_BEARER_TOKEN: "${ZENMCP_BEARER_TOKEN:-d528f5b625f5e6c73767d678644b80ce0db159433d2bb50c948d92f5093631c2}"
+            ZENMCP_BEARER_TOKEN: "${ZENMCP_BEARER_TOKEN:?Set ZENMCP_BEARER_TOKEN to a random secret}"
+            ZENMCP_USER_IDS: "${ZENMCP_USER_IDS:-}"
             ZENMCP_ALLOWED_ORIGINS: "${ZENMCP_ALLOWED_ORIGINS:-}"
             ZENMCP_REPORT_TIMEZONE: "${ZENMCP_REPORT_TIMEZONE:-UTC}"
             ZENMCP_MAX_PERIOD_DAYS: "${ZENMCP_MAX_PERIOD_DAYS:-3660}"

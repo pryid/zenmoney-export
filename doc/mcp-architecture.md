@@ -56,12 +56,11 @@ The boundaries are intentional:
 
 ### Local container topology
 
-`docker/docker-compose.mcp.yml` contains only the read-only `mcp` service and uses the separate
-Compose project name `zenmcp`. It joins the exporter project's existing default network as an
-external network (`docker_default` by default, configurable with `ZENEXPORT_DOCKER_NETWORK`). The
-exporter Compose project remains the sole owner of PostgreSQL, migrations, synchronization, its
-network lifecycle, and `docker_postgres_data`. Consequently, stopping or removing the MCP project
-cannot delete the database volume or stop the writer stack.
+`podman/compose.yml` and `podman/compose.mcp.yml` define the exporter and the read-only MCP
+service in the same `zenexport` Podman Compose project and network. `podman/up --mcp` waits for
+PostgreSQL, runs migrations to completion and checks their exit status, then starts the exporter
+and MCP. PostgreSQL data is stored in a named Podman volume. Stopping only `mcp` leaves the writer
+and database running; `down` preserves the volume unless `-v` is specified.
 
 ## Public tool contracts
 

@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,32 +9,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/nemirlev/zenmoney-export/v2/internal/analytics"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
 func TestAnalyticsQueriesAgainstPostgres(t *testing.T) {
-	postgresVersion := os.Getenv("POSTGRES_VERSION")
-	if postgresVersion == "" {
-		postgresVersion = "18"
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	container, err := tcpostgres.Run(
-		ctx,
-		"postgres:"+postgresVersion+"-alpine",
-		tcpostgres.WithDatabase("zenanalytics"),
-		tcpostgres.WithUsername("zenanalytics"),
-		tcpostgres.WithPassword("zenanalytics"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	if err != nil {
-		t.Skipf("Docker is unavailable for analytics integration test: %v", err)
-	}
-	testcontainers.CleanupContainer(t, container)
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	dsn := startTestPostgres(t, ctx, "zenanalytics")
 	migrations, err := filepath.Glob(
 		filepath.Join("..", "..", "..", "migrations", "postgres", "*.up.sql"),
 	)

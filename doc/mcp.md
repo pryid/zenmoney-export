@@ -233,46 +233,42 @@ contracts and calculation policies.
 
 ## Container deployment
 
-### Docker Compose and local Codex
+### Podman Compose and local Codex
 
 The MCP Compose file contains only `mcp` and is designed to be merged with the exporter Compose
-file. Both files use one ignored environment file and one Compose project, so PostgreSQL, exporter,
-and MCP share the default network. From the repository root, replace every credential placeholder
-and generate a random bearer secret:
+file. Both files use one ignored environment file and one Podman Compose project, so PostgreSQL,
+exporter, and MCP share the default network. Install Podman and `podman-compose` 1.6 or later; on
+macOS and Windows, start a Podman machine first. From the repository root, replace every credential
+placeholder and generate a random bearer secret:
 
 ```bash
-cp -n docker/.env.example docker/.env
+cp -n podman/.env.example podman/.env
 openssl rand -hex 32
-# Edit docker/.env and paste the generated value into ZENMCP_BEARER_TOKEN.
+# Edit podman/.env and paste the generated value into ZENMCP_BEARER_TOKEN.
 ```
 
-Start the complete stack with both Compose files:
+Start the complete stack; the script waits for PostgreSQL and checks migration success before starting either application:
 
 ```bash
-docker compose --env-file docker/.env \
-  -f docker/docker-compose.postgres.yml \
-  -f docker/docker-compose.mcp.yml \
-  up -d --build
-docker compose --env-file docker/.env \
-  -f docker/docker-compose.postgres.yml \
-  -f docker/docker-compose.mcp.yml \
-  ps
+./podman/up --mcp
+podman-compose -p zenexport --env-file podman/.env \
+  -f podman/compose.yml -f podman/compose.mcp.yml ps
 curl --fail --silent --show-error http://127.0.0.1:8080/healthz
 curl --fail --silent --show-error http://127.0.0.1:8080/readyz
 ```
 
 Compose merges `postgres`, `migrations`, `app`, and `mcp` into one project and default network.
-`DB_URL` must remain an internal Docker URL whose host is the exporter service name `postgres`;
+`DB_URL` must remain an internal Podman URL whose host is the exporter service name `postgres`;
 the MCP Compose file passes the same value to `zenmcp` as `ZENMCP_DB_URL`.
 
 If `ZENMCP_PORT` was changed, use that host port in the URLs. The MCP Compose file publishes only
 the MCP port and binds it to `127.0.0.1`; PostgreSQL port and volume policy remain in the exporter
 Compose file. On macOS, Codex runs on the host, so use `http://127.0.0.1:8080/mcp`. Container DNS
-names such as `postgres` work only on the shared Docker network.
+names such as `postgres` work only on the shared Podman network.
 
 The server secret and the Codex client variable are related but live in different processes:
 
-- `ZENMCP_BEARER_TOKEN` in `docker/.env` is injected into the server container. It is the secret
+- `ZENMCP_BEARER_TOKEN` in `podman/.env` is injected into the server container. It is the secret
   against which requests are authenticated.
 - `ZENMCP_CLIENT_BEARER_TOKEN` below is an example client-side variable. Its value must exactly
   match the server secret. The name is arbitrary and does not need to match the server variable.
@@ -314,28 +310,27 @@ for the shared configuration model and current Streamable HTTP support.
 Stop only MCP:
 
 ```bash
-docker compose --env-file docker/.env \
-  -f docker/docker-compose.postgres.yml \
-  -f docker/docker-compose.mcp.yml \
-  stop mcp
+podman-compose -p zenexport --env-file podman/.env \
+  -f podman/compose.yml -f podman/compose.mcp.yml stop mcp
 ```
 
-This keeps PostgreSQL and exporter running. Use the same two-file command with `down` to stop the
-whole project; the PostgreSQL volume is preserved unless `--volumes` is explicitly supplied.
+This keeps PostgreSQL and exporter running. Use `./podman/up --mcp` to start MCP again after
+verifying migrations. Use the same two-file command with `down` to stop the whole project; the PostgreSQL volume is preserved unless `--volumes` is explicitly supplied.
 
 ### Standalone image
 
 Build the MCP image independently from the synchronizer:
 
 ```bash
-docker build -f docker/Dockerfile.zenmcp -t zenmcp:local .
+podman build -f podman/Containerfile.zenmcp -t zenmcp:local .
 ```
 
 Run it with bearer authentication. In production, inject the database URL and bearer token through
 your platform's secrets facility instead of writing them on the command line:
 
 ```bash
-docker run --rm -p 8080:8080 \
+podman run --rm -p 127.0.0.1:8080:8080 \
+  --health-cmd="wget -q -O - http://127.0.0.1:8080/readyz >/dev/null || exit 1" \
   -e ZENMCP_DB_URL='postgres://mcp_reader:password@database:5432/zenmoney?sslmode=verify-full' \
   -e ZENMCP_LISTEN_ADDRESS='0.0.0.0:8080' \
   -e ZENMCP_AUTH_MODE=bearer \
@@ -343,8 +338,9 @@ docker run --rm -p 8080:8080 \
   zenmcp:local
 ```
 
-The image contains only the `zenmcp` binary and CA certificates, runs as a non-root user, exposes
-port 8080, and checks `/healthz`. It is independent of the existing `zenexport` image and entrypoint.
+The image contains only the `zenmcp` binary and CA certificates, runs as a non-root user,
+and exposes port 8080. The run command configures a readiness health check; the Compose service
+configures its own. The image is independent of the existing `zenexport` image and entrypoint.
 Database migrations and synchronization remain separate deployment responsibilities.
 
 ## Health, readiness, and shutdown

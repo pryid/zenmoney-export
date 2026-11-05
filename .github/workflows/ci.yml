@@ -57,8 +57,11 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
 
+      - name: Install Podman
+        run: sudo apt-get update && sudo apt-get install -y podman uidmap
+
       - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out $(go list ./... | grep -v /mocks)
+        run: go test -v -race -coverprofile=coverage.out ./...
 
       - name: Upload coverage to Codecov
         if: matrix.go == '1.27'
@@ -87,8 +90,79 @@ jobs:
           go-version: '1.27'
           cache: true
 
+      - name: Install Podman
+        run: sudo apt-get update && sudo apt-get install -y podman uidmap
+
       - name: Run PostgreSQL compatibility test
         run: go test -v ./internal/db/postgres -run '^TestPostgresCompatibility$'
+
+  podman-stack:
+    name: Podman stack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Podman and podman-compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman uidmap catatonit python3-venv
+          python3 -m venv "$RUNNER_TEMP/podman-compose"
+          "$RUNNER_TEMP/podman-compose/bin/pip" install podman-compose==1.6.0
+          echo "$RUNNER_TEMP/podman-compose/bin" >> "$GITHUB_PATH"
+
+      - name: Start and check stack
+        env:
+          ZENEXPORT_ENV_FILE: ${{ runner.temp }}/zenexport.env
+          ZENEXPORT_PROJECT_NAME: zenexport-ci
+        run: |
+          cat > "$ZENEXPORT_ENV_FILE" <<'ENV'
+          POSTGRES_USER=zenexport
+          POSTGRES_PASSWORD=test-only
+          POSTGRES_DB=zenexport
+          DB_URL=postgres://zenexport:test-only@postgres:5432/zenexport?sslmode=disable
+          ZEN_API_TOKEN=invalid-ci-token
+          ZENMCP_BEARER_TOKEN=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          ZENMCP_PORT=18080
+          ENV
+          ./podman/up --mcp
+          for ((attempt=0; attempt<60; attempt++)); do
+            if curl -fsS http://127.0.0.1:18080/readyz; then exit 0; fi
+            sleep 2
+          done
+          podman-compose -p "$ZENEXPORT_PROJECT_NAME" --env-file "$ZENEXPORT_ENV_FILE" \
+            -f podman/compose.yml -f podman/compose.mcp.yml logs
+          exit 1
+
+      - name: Check failed migrations block application startup
+        env:
+          ZENEXPORT_ENV_FILE: ${{ runner.temp }}/zenexport-failure.env
+          ZENEXPORT_PROJECT_NAME: zenexport-failure
+        run: |
+          sed 's|@postgres:5432/|@postgres:5433/|' "$RUNNER_TEMP/zenexport.env" > "$ZENEXPORT_ENV_FILE"
+          if ./podman/up --mcp; then
+            echo "Expected migration failure" >&2
+            exit 1
+          fi
+          if [ -n "$(podman ps -aq --filter label=io.podman.compose.project=zenexport-failure --filter label=io.podman.compose.service=app)" ] || \
+             [ -n "$(podman ps -aq --filter label=io.podman.compose.project=zenexport-failure --filter label=io.podman.compose.service=mcp)" ]; then
+            echo "Applications must not start after failed migrations" >&2
+            exit 1
+          fi
+
+      - name: Remove test stack
+        if: always()
+        env:
+          ZENEXPORT_ENV_FILE: ${{ runner.temp }}/zenexport.env
+        run: |
+          if [ -f "$ZENEXPORT_ENV_FILE" ]; then
+            podman-compose -p zenexport-ci --env-file "$ZENEXPORT_ENV_FILE" \
+              -f podman/compose.yml -f podman/compose.mcp.yml down -v
+          fi
+          if [ -f "$RUNNER_TEMP/zenexport-failure.env" ]; then
+            podman-compose -p zenexport-failure --env-file "$RUNNER_TEMP/zenexport-failure.env" \
+              -f podman/compose.yml -f podman/compose.mcp.yml down -v
+          fi
 
   build:
     name: Build

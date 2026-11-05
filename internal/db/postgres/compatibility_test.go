@@ -11,8 +11,6 @@ import (
 	"github.com/nemirlev/zenmoney-export/v2/internal/interfaces"
 	"github.com/nemirlev/zenmoney-go-sdk/v3/models"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
 func TestPostgresCompatibility(t *testing.T) {
@@ -30,19 +28,7 @@ func TestPostgresCompatibility(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	container, err := tcpostgres.Run(
-		ctx,
-		"postgres:"+postgresVersion+"-alpine",
-		tcpostgres.WithDatabase("zenexport"),
-		tcpostgres.WithUsername("zenexport"),
-		tcpostgres.WithPassword("zenexport"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	testcontainers.CleanupContainer(t, container)
-	require.NoError(t, err)
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	dsn := startTestPostgres(t, ctx, "zenexport")
 	applyMigrations(t, ctx, dsn, migrationFiles)
 
 	storage, err := NewPostgresStorage(dsn)

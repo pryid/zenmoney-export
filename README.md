@@ -10,10 +10,11 @@ service [ZenMoney](https://zenmoney.ru/) to your own database.
 - 🚀 Fast and reliable synchronization. Support Full and Incremental sync modes.
 - 📊 Supports PostgreSQL (with plans for other databases).
 - 🛠️ Easy-to-configure options for various use cases.
-- 🐳 Docker-ready for seamless deployment.
+- 📦 Rootless Podman deployment for the exporter, PostgreSQL, and MCP.
 
 ## Requirements
 
+- Podman and `podman-compose` 1.6 or later for the container deployment. On macOS and Windows, start a Podman machine first.
 - PostgreSQL 15 through 18. PostgreSQL 14 and earlier cannot run the bundled migrations because
   migration `000003` uses `UNIQUE NULLS NOT DISTINCT`, which was introduced in PostgreSQL 15.
 
@@ -22,28 +23,43 @@ service [ZenMoney](https://zenmoney.ru/) to your own database.
 Obtain an API token from ZenMoney by visiting [Budgera](https://budgera.com) or [Zerro.app](https://zerro.app/token) and following the instructions to
 generate your token.
 
-1. Copy `./docker/.env.example` to `./docker/.env` and replace every placeholder.
-2. Start PostgreSQL, run migrations, and then start the exporter:
+1. Copy `podman/.env.example` to `podman/.env` and replace the PostgreSQL credentials and
+   ZenMoney API token. Ensure the credentials in `DB_URL` match the PostgreSQL variables.
+2. Start PostgreSQL, run migrations, and start the exporter:
 
 ```bash
-docker compose --env-file ./docker/.env -f ./docker/docker-compose.postgres.yml up -d
+cp -n podman/.env.example podman/.env
+# Edit podman/.env before starting the stack.
+./podman/up
 ```
 
-By default, Compose builds the exporter from the current checkout so the binary and the mounted
-migrations stay compatible. To use a prebuilt image, set `ZENEXPORT_IMAGE` and
-`ZENEXPORT_PULL_POLICY=always` in `./docker/.env`; the selected image must support the schema
-created by the migrations in this checkout.
+The script uses rootless Podman and `podman-compose` with the project name `zenexport`. It waits for
+PostgreSQL and checks that migrations succeed before starting the exporter. To use another project
+or environment file, set `ZENEXPORT_PROJECT_NAME` or `ZENEXPORT_ENV_FILE`. The initial startup
+builds the exporter from this checkout. After changing source code, rebuild with
+`podman-compose -p zenexport --env-file podman/.env -f podman/compose.yml build app`, then rerun
+`./podman/up`. To use a schema-compatible prebuilt image instead, set `ZENEXPORT_IMAGE` and
+`ZENEXPORT_PULL_POLICY=always` in `podman/.env`.
 
-The example runs PostgreSQL 18, keeps it on the private Docker network, and does not publish its
-port to the host. Its `sslmode=disable` setting is intended only for this local development stack;
-use a TLS-verified connection URL for an external or production database. The Compose stack runs
-schema migrations in a separate service. For an external database, verify that it runs a supported
-PostgreSQL version and apply the bundled migrations separately before starting the exporter.
+PostgreSQL 18 is only accessible on the private Podman network. `sslmode=disable` is intended
+for this local development stack; use a TLS-verified connection URL for an external or production
+database. PostgreSQL 18 stores its data under `/var/lib/postgresql`, where the named Podman volume
+is mounted. Do not reuse a PostgreSQL 17-or-earlier data volume directly: perform a major-version
+upgrade or restore a backup into a fresh PostgreSQL 18 volume.
 
-PostgreSQL 18 changed the official Docker image's data layout. The Compose volume is therefore
-mounted at `/var/lib/postgresql`, which is the supported mount point for PostgreSQL 18 and later.
-Do not reuse a PostgreSQL 17-or-earlier data volume directly: perform a normal major-version upgrade
-or restore a backup into a fresh PostgreSQL 18 volume.
+An existing Docker installation and its volumes are separate from Podman. Back up the existing
+database and restore it into the new Podman PostgreSQL volume before using this stack with existing
+data; moving the configuration does not migrate the database automatically. A previous `docker/.env`
+can be copied to `podman/.env` and adjusted for the new stack.
+
+Stop the stack while preserving its volume:
+
+```bash
+podman-compose -p zenexport --env-file podman/.env -f podman/compose.yml down
+```
+
+Add `-f podman/compose.mcp.yml` before `down` when the stack was started with MCP. Avoid `down -v`
+unless you intend to delete its database volume.
 
 ## Configuration
 
@@ -116,22 +132,19 @@ token, then generate a bearer token with `openssl rand -hex 32` and save it as
 `ZENMCP_BEARER_TOKEN`:
 
 ```bash
-cp -n docker/.env.example docker/.env
+cp -n podman/.env.example podman/.env
 openssl rand -hex 32
 ```
 
 Start the exporter and MCP together. Compose merges both files into one project and default
-network; `zenmcp` reuses `DB_URL` from `docker/.env` and connects to the same PostgreSQL service:
+network; `zenmcp` reuses `DB_URL` from `podman/.env` and connects to the same PostgreSQL service:
 
 ```bash
-docker compose --env-file docker/.env \
-  -f docker/docker-compose.postgres.yml \
-  -f docker/docker-compose.mcp.yml \
-  up -d --build
+./podman/up --mcp
 ```
 
 Register its Streamable HTTP endpoint in Codex. The client variable must contain the same bearer
-token as `ZENMCP_BEARER_TOKEN` in `docker/.env`:
+token as `ZENMCP_BEARER_TOKEN` in `podman/.env`:
 
 ```bash
 export ZENMCP_CLIENT_BEARER_TOKEN='paste-the-same-token-here'
@@ -214,7 +227,7 @@ make lint-fix    # run linter with auto-fix
 
 ## Releasing
 
-[Release Please](https://github.com/googleapis/release-please) maintains a release pull request from conventional commits merged into `main`. Merging that pull request creates the version tag and GitHub release, uploads GoReleaser artifacts, and publishes the versioned Docker image.
+[Release Please](https://github.com/googleapis/release-please) maintains a release pull request from conventional commits merged into `main`. Merging that pull request creates the version tag and GitHub release, uploads GoReleaser artifacts, and publishes the versioned multi-architecture container image with Podman.
 
 Configure a repository secret named `RELEASE_PLEASE_TOKEN` with a personal access token if Release Please pull requests must trigger CI workflows. Without it, the workflow falls back to `GITHUB_TOKEN` and can still maintain releases, but GitHub does not start new workflow runs for events created by that token.
 
@@ -225,3 +238,17 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ## Acknowledgments
 
 Thanks to the ZenMoney team for their API and documentation, and to all contributors who help make this tool better.
+
+### PostgreSQL integration tests
+
+The integration tests start temporary PostgreSQL containers directly with Podman and remove them
+when each test ends. They require a working rootless Podman installation and network access to pull
+PostgreSQL images. Run the whole suite with `go test ./...`, or select a supported PostgreSQL
+version, for example:
+
+```bash
+POSTGRES_VERSION=16 go test ./internal/db/postgres -run '^TestPostgresCompatibility$' -count=1
+```
+
+If Go runs inside a Toolbox container, run the tests on the host or make the host's `podman` command
+available to the test process. The tests do not require a Docker-compatible socket.

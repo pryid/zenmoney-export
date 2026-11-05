@@ -1,11 +1,10 @@
 services:
     app:
-        image: "${ZENEXPORT_IMAGE:-zenexport:local}"
+        image: "${ZENEXPORT_IMAGE:-localhost/zenexport:local}"
         build:
             context: ..
-            dockerfile: docker/Dockerfile
+            dockerfile: podman/Containerfile
         pull_policy: "${ZENEXPORT_PULL_POLICY:-build}"
-        container_name: zenexport_app
         environment:
             DB_URL: "${DB_URL:?Set DB_URL to the internal PostgreSQL connection URL}"
             DB_TYPE: postgres
@@ -17,14 +16,11 @@ services:
             migrations:
                 condition: service_completed_successfully
     postgres:
-        image: postgres:18.6-alpine3.23
-        container_name: zenexport_postgres
+        image: docker.io/library/postgres:18.6-alpine3.23
         environment:
             POSTGRES_USER: "${POSTGRES_USER:?Set POSTGRES_USER}"
             POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}"
             POSTGRES_DB: "${POSTGRES_DB:?Set POSTGRES_DB}"
-        ports:
-            -   "${POSTGRES_PORT:-5455}:5432"
         volumes:
             # PostgreSQL 18+ stores versioned clusters below this directory.
             - postgres_data:/var/lib/postgresql
@@ -35,10 +31,9 @@ services:
             retries: 10
             start_period: 10s
     migrations:
-        image: migrate/migrate:v4.19.1
-        container_name: zenexport_migrations
+        image: docker.io/migrate/migrate:v4.19.1
         volumes:
-            - ../migrations/postgres:/migrations:ro
+            - ../migrations/postgres:/migrations:ro,z
         depends_on:
             postgres:
                 condition: service_healthy

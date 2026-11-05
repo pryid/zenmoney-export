@@ -1,0 +1,47 @@
+#!/bin/sh
+# Start the database, apply migrations, and only then start the application.
+set -eu
+
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+env_file=${ZENEXPORT_ENV_FILE:-"$root/podman/.env"}
+project=${ZENEXPORT_PROJECT_NAME:-zenexport}
+mcp=false
+case "${1:-}" in
+    '') ;;
+    --mcp) mcp=true ;;
+    *) echo "Usage: $0 [--mcp]" >&2; exit 2 ;;
+esac
+[ "$#" -le 1 ] || { echo "Usage: $0 [--mcp]" >&2; exit 2; }
+[ -f "$env_file" ] || { echo "Environment file not found: $env_file" >&2; exit 1; }
+
+compose() {
+    if [ "$mcp" = true ]; then
+        podman-compose -p "$project" --env-file "$env_file" \
+            -f "$root/podman/compose.yml" -f "$root/podman/compose.mcp.yml" "$@"
+    else
+        podman-compose -p "$project" --env-file "$env_file" \
+            -f "$root/podman/compose.yml" "$@"
+    fi
+}
+
+compose up -d --no-deps postgres
+attempt=0
+# Expand the database credentials inside the PostgreSQL container.
+# shellcheck disable=SC2016
+until compose exec -T postgres sh -c 'pg_isready -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 60 ]; then
+        echo "PostgreSQL did not become ready within 120 seconds" >&2
+        exit 1
+    fi
+    sleep 2
+done
+
+# podman-compose treats service_completed_successfully as stopped, including failures.
+# Running migrations in the foreground propagates their exit status before starting either service.
+compose run -T --rm --no-deps migrations
+if [ "$mcp" = true ]; then
+    compose up -d --force-recreate --no-deps app mcp
+else
+    compose up -d --force-recreate --no-deps app
+fi
