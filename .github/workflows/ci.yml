@@ -147,6 +147,23 @@ jobs:
             -f podman/compose.yml -f podman/compose.mcp.yml logs
           exit 1
 
+      - name: Check exporter proxy configuration
+        env:
+          ZENEXPORT_ENV_FILE: ${{ runner.temp }}/zenexport.env
+          HTTP_PROXY: http://127.0.0.1:2080
+          HTTPS_PROXY: http://127.0.0.1:2080
+        run: |
+          export http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY"
+          # shellcheck disable=SC2016
+          podman-compose -p zenexport-ci --env-file "$ZENEXPORT_ENV_FILE" \
+            -f podman/compose.yml run -T --rm --no-deps --entrypoint /bin/sh app -c \
+            'test -z "$HTTP_PROXY" && test -z "$http_proxy" && test -z "$HTTPS_PROXY" && test -z "$https_proxy"'
+          # shellcheck disable=SC2016
+          ZENEXPORT_HTTPS_PROXY=http://proxy.example:8080 \
+            podman-compose -p zenexport-ci --env-file "$ZENEXPORT_ENV_FILE" \
+            -f podman/compose.yml run -T --rm --no-deps --entrypoint /bin/sh app -c \
+            'test "$HTTPS_PROXY" = http://proxy.example:8080 && test "$https_proxy" = http://proxy.example:8080'
+
       - name: Check failed migrations block application startup
         env:
           ZENEXPORT_ENV_FILE: ${{ runner.temp }}/zenexport-failure.env

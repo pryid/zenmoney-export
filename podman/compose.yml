@@ -10,6 +10,13 @@ services:
             DB_TYPE: postgres
             ZEN_API_TOKEN: "${ZEN_API_TOKEN:?Set ZEN_API_TOKEN to your ZenMoney API token}"
             ZEN_MAX_RESPONSE_SIZE_MB: "${ZEN_MAX_RESPONSE_SIZE_MB:-256}"
+            # Podman otherwise inherits host proxy settings, including unreachable loopback proxies.
+            HTTP_PROXY: "${ZENEXPORT_HTTP_PROXY:-}"
+            http_proxy: "${ZENEXPORT_HTTP_PROXY:-}"
+            HTTPS_PROXY: "${ZENEXPORT_HTTPS_PROXY:-}"
+            https_proxy: "${ZENEXPORT_HTTPS_PROXY:-}"
+            NO_PROXY: "${ZENEXPORT_NO_PROXY:-}"
+            no_proxy: "${ZENEXPORT_NO_PROXY:-}"
         depends_on:
             postgres:
                 condition: service_healthy

@@ -72,6 +72,7 @@ Global variables:
 - `DB_TYPE`: Database type. Default: `postgres`.
 - `LOG_LEVEL`: Log level for the exporter. Default: `info`.
 - `ZEN_MAX_RESPONSE_SIZE_MB`: Maximum successful ZenMoney API response size in MiB. Default: `256`; increase it if a very large full sync exceeds the limit.
+- `ZENEXPORT_HTTP_PROXY`, `ZENEXPORT_HTTPS_PROXY`, `ZENEXPORT_NO_PROXY`: Optional proxy settings for the exporter container. The exporter connects directly by default; Podman does not automatically pass host HTTP proxy settings to it. A proxy on `127.0.0.1` inside the container is not the host's loopback interface, so use an address reachable from the container and configure the proxy to listen on that address.
 
 `TOKEN` and `DB_CONFIG` remain supported as legacy aliases for `ZEN_API_TOKEN` and `DB_URL`.
 When both names are set, the canonical name takes precedence.
