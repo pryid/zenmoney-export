@@ -142,7 +142,9 @@ Start with a small batch, then fetch the rest:
 The default interval is one second between requests; `--interval 2s` makes it longer. Identical QR
 codes are requested once, successful receipts are skipped on future runs, and each response is saved
 atomically. Interrupting the command leaves already saved results in place. A receipt with no items
-is marked unavailable and retried on the next run. Network or HTTP errors stop the run so it can be
+is marked unavailable and retried on the next run. HTTP 5xx responses are retried twice; an
+individual receipt that still fails is marked unavailable so fetching can continue. Three consecutive
+server errors, a network failure, or an authorization or rate-limit error stops the run so it can be
 resumed later. Some receipts may never be available or may contain no item details.
 
 Export all saved receipt items, one row per item and without duplicating receipts shared by several

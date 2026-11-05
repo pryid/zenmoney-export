@@ -91,6 +91,29 @@ func TestFetchReceiptHTTPFailureAndUnavailable(t *testing.T) {
 	}
 }
 
+func TestFetchRetriesServerErrors(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_, _ = io.WriteString(w, `{"items":[{"name":"Tea","quantity":1,"price":2,"sum":2}]}`)
+	}))
+	defer server.Close()
+	client := receiptClient{
+		httpClient:  server.Client(),
+		endpoint:    server.URL,
+		token:       "test",
+		retryDelays: []time.Duration{0, 0},
+	}
+	_, receipt, err := client.fetchWithRetry(context.Background(), "test-code")
+	require.NoError(t, err)
+	require.Len(t, receipt.Items, 1)
+	require.Equal(t, 3, calls)
+}
+
 func TestReceiptPersistenceAndResume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -115,6 +138,10 @@ func TestReceiptPersistenceAndResume(t *testing.T) {
 		requests++
 		var request map[string]string
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+		if request["code"] == "qr-3" || strings.HasPrefix(request["code"], "bad-") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		if request["code"] == "qr-2" && requests <= 2 {
 			_, _ = io.WriteString(w, `{"items":[]}`)
 			return
@@ -142,6 +169,7 @@ func TestReceiptPersistenceAndResume(t *testing.T) {
 		"qr-1",
 		[]byte(`{"items":[]}`),
 		[]receiptItem{{Name: "bad", Price: "not-a-number"}},
+		"",
 	)
 	require.Error(t, err)
 	require.NoError(t, db.QueryRow(ctx, "SELECT amount::text FROM receipt_item").Scan(&amount))
@@ -160,6 +188,48 @@ func TestReceiptPersistenceAndResume(t *testing.T) {
 	require.Equal(t, 3, requests, "only previously unavailable receipts must be retried")
 	require.NoError(t, db.QueryRow(ctx, "SELECT COUNT(*) FROM receipt_item").Scan(&count))
 	require.Equal(t, 2, count)
+
+	_, err = db.Exec(ctx, `INSERT INTO transaction (id, date, qr_code, deleted)
+		VALUES ('00000000-0000-0000-0000-000000000005', '2026-11-06', 'qr-3', false),
+		       ('00000000-0000-0000-0000-000000000006', '2026-11-05', 'qr-4', false)`)
+	require.NoError(t, err)
+	client.retryDelays = []time.Duration{0, 0}
+	require.NoError(t, fetchReceipts(ctx, db, client, 0, 0, &log))
+	require.Equal(
+		t,
+		7,
+		requests,
+		"failed receipt should receive three attempts before the next receipt",
+	)
+	var status, lastError string
+	require.NoError(
+		t,
+		db.QueryRow(ctx, `SELECT status, last_error FROM receipt WHERE qr_code = 'qr-3'`).
+			Scan(&status, &lastError),
+	)
+	require.Equal(t, "unavailable", status)
+	require.Equal(t, "HTTP 500", lastError)
+	require.NoError(t, db.QueryRow(ctx, "SELECT COUNT(*) FROM receipt_item").Scan(&count))
+	require.Equal(t, 3, count, "the receipt following a failure must still be saved")
+
+	// A widespread outage must stop the run rather than querying every remaining receipt.
+	_, err = db.Exec(ctx, "TRUNCATE receipt_item, receipt, transaction RESTART IDENTITY")
+	require.NoError(t, err)
+	_, err = db.Exec(ctx, `INSERT INTO transaction (id, date, qr_code, deleted)
+		VALUES ('00000000-0000-0000-0000-000000000011', '2026-11-04', 'bad-1', false),
+		       ('00000000-0000-0000-0000-000000000012', '2026-11-03', 'bad-2', false),
+		       ('00000000-0000-0000-0000-000000000013', '2026-11-02', 'bad-3', false),
+		       ('00000000-0000-0000-0000-000000000014', '2026-11-01', 'untouched', false)`)
+	require.NoError(t, err)
+	requests = 0
+	err = fetchReceipts(ctx, db, client, 0, 0, &log)
+	require.ErrorContains(t, err, "3 consecutive")
+	require.Equal(t, 9, requests, "three failures with three attempts each must stop the run")
+	require.NoError(
+		t,
+		db.QueryRow(ctx, "SELECT COUNT(*) FROM receipt WHERE last_error = 'HTTP 500'").Scan(&count),
+	)
+	require.Equal(t, 3, count)
 }
 
 func startPostgres(t *testing.T, ctx context.Context) *pgx.Conn {

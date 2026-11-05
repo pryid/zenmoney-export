@@ -37,9 +37,18 @@ type receiptResponse struct {
 }
 
 type receiptClient struct {
-	httpClient *http.Client
-	endpoint   string
-	token      string
+	httpClient  *http.Client
+	endpoint    string
+	token       string
+	retryDelays []time.Duration
+}
+
+type receiptHTTPError struct {
+	status int
+}
+
+func (e *receiptHTTPError) Error() string {
+	return fmt.Sprintf("receipt request returned HTTP %d", e.status)
 }
 
 func (c receiptClient) fetch(ctx context.Context, qr string) ([]byte, *receiptResponse, error) {
@@ -64,7 +73,7 @@ func (c receiptClient) fetch(ctx context.Context, qr string) ([]byte, *receiptRe
 		return nil, &receiptResponse{}, nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("receipt request returned HTTP %d", resp.StatusCode)
+		return nil, nil, &receiptHTTPError{status: resp.StatusCode}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
@@ -78,6 +87,29 @@ func (c receiptClient) fetch(ctx context.Context, qr string) ([]byte, *receiptRe
 		return nil, nil, fmt.Errorf("decode receipt response: %w", err)
 	}
 	return raw, &result, nil
+}
+
+// fetchWithRetry retries server errors, while authorization and rate-limit failures stop immediately.
+func (c receiptClient) fetchWithRetry(
+	ctx context.Context,
+	qr string,
+) ([]byte, *receiptResponse, error) {
+	for attempt := 0; ; attempt++ {
+		raw, response, err := c.fetch(ctx, qr)
+		var statusErr *receiptHTTPError
+		if err == nil || !errors.As(err, &statusErr) || statusErr.status < 500 ||
+			statusErr.status > 599 ||
+			attempt >= len(c.retryDelays) {
+			return raw, response, err
+		}
+		timer := time.NewTimer(c.retryDelays[attempt])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func main() {
@@ -126,8 +158,9 @@ func run(ctx context.Context, args []string, out, log io.Writer) error {
 				return errors.New("receipt endpoint redirect refused")
 			},
 		},
-		endpoint: receiptEndpoint,
-		token:    token,
+		endpoint:    receiptEndpoint,
+		token:       token,
+		retryDelays: []time.Duration{2 * time.Second, 4 * time.Second},
 	}
 	return fetchReceipts(ctx, db, client, *limit, *interval, log)
 }
@@ -178,7 +211,7 @@ func fetchReceipts(
 		return fmt.Errorf("read receipt identifiers: %w", err)
 	}
 	fmt.Fprintf(log, "Receipts to request: %d\n", len(codes))
-	complete, unavailable := 0, 0
+	complete, unavailable, consecutiveErrors := 0, 0, 0
 	for i, code := range codes {
 		if i > 0 && interval > 0 {
 			timer := time.NewTimer(interval)
@@ -189,17 +222,41 @@ func fetchReceipts(
 			case <-timer.C:
 			}
 		}
-		raw, response, err := client.fetch(ctx, code)
+		raw, response, err := client.fetchWithRetry(ctx, code)
+		lastError := ""
+		var statusErr *receiptHTTPError
 		if err != nil {
-			return fmt.Errorf("stopped after %d/%d receipts: %w", i, len(codes), err)
+			if !errors.As(err, &statusErr) || statusErr.status < 500 || statusErr.status > 599 {
+				return fmt.Errorf("stopped after %d/%d receipts: %w", i, len(codes), err)
+			}
+			lastError = fmt.Sprintf("HTTP %d", statusErr.status)
+			response = &receiptResponse{}
+			consecutiveErrors++
+		} else {
+			consecutiveErrors = 0
 		}
-		if err := saveReceipt(ctx, db, code, raw, response.Items); err != nil {
+		if err := saveReceipt(ctx, db, code, raw, response.Items, lastError); err != nil {
 			return fmt.Errorf("save receipt %d/%d: %w", i+1, len(codes), err)
 		}
 		if len(response.Items) == 0 {
 			unavailable++
 		} else {
 			complete++
+		}
+		if lastError != "" {
+			fmt.Fprintf(
+				log,
+				"Receipt %d/%d unavailable after retries (%s); continuing\n",
+				i+1,
+				len(codes),
+				lastError,
+			)
+		}
+		if consecutiveErrors >= 3 {
+			return fmt.Errorf(
+				"stopped after %d consecutive receipt server errors; retry later",
+				consecutiveErrors,
+			)
 		}
 		if (i+1)%10 == 0 || i+1 == len(codes) {
 			fmt.Fprintf(
@@ -221,6 +278,7 @@ func saveReceipt(
 	qr string,
 	raw []byte,
 	items []receiptItem,
+	lastError string,
 ) error {
 	tx, err := db.Begin(ctx)
 	if err != nil {
@@ -236,11 +294,11 @@ func saveReceipt(
 		response = string(raw)
 	}
 	var id int64
-	err = tx.QueryRow(ctx, `INSERT INTO receipt (qr_code, status, response, fetched_at)
-		VALUES ($1, $2, $3::jsonb, CURRENT_TIMESTAMP)
+	err = tx.QueryRow(ctx, `INSERT INTO receipt (qr_code, status, response, last_error, fetched_at)
+		VALUES ($1, $2, $3::jsonb, NULLIF($4, ''), CURRENT_TIMESTAMP)
 		ON CONFLICT (qr_code) DO UPDATE SET status = EXCLUDED.status,
-		response = EXCLUDED.response, fetched_at = EXCLUDED.fetched_at
-		RETURNING id`, qr, status, response).Scan(&id)
+		response = EXCLUDED.response, last_error = EXCLUDED.last_error, fetched_at = EXCLUDED.fetched_at
+		RETURNING id`, qr, status, response, lastError).Scan(&id)
 	if err != nil {
 		return err
 	}

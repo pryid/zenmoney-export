@@ -1,0 +1,1 @@
+ALTER TABLE receipt DROP COLUMN IF EXISTS last_error;
