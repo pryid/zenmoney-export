@@ -312,29 +312,9 @@ issues:
   # Make issues output unique by line.
   # Default: true
   uniq-by-line: false
-  # Show only new issues: if there are unstaged changes or untracked files,
-  # only those changes are analyzed, else only changes in HEAD~ are analyzed.
-  # It's a super-useful option for integration of golangci-lint into existing large codebase.
-  # It's not practical to fix all existing issues at the moment of integration:
-  # much better don't allow issues in new code.
-  #
-  # Default: false
-  new: true
-  # Show only new issues created after the best common ancestor (merge-base against HEAD).
-  # Default: ""
-  new-from-merge-base: main
-  # Show only new issues created after git revision `REV`.
-  # Default: ""
-  new-from-rev: HEAD
-  # Show only new issues created in git patch with set file path.
-  # Default: ""
-  new-from-patch: path/to/patch/file
-  # Show issues in any part of update files (requires new-from-rev or new-from-patch).
-  # Default: false
-  whole-files: true
-  # Apply the fixes detected by the linters and formatters (if it's supported by the linter).
-  # Default: false
-  fix: true
+  # CI selects the base revision with --new-from-rev. Local runs check all issues.
+  new: false
+  fix: false
 
 output:
   sort-order:

@@ -1,6 +1,6 @@
 # ZenMoney Export
 
-[![MCP Server](https://img.shields.io/badge/MCP-read--only-7C3AED)](doc/mcp.md) [![GoDoc](https://godoc.org/github.com/zenexport/zenmoney-export?status.svg)](https://godoc.org/github.com/nemirlev/zenmoney-export) [![golangci-lint](https://img.shields.io/badge/golangci--lint-enabled-brightgreen?logo=go)](https://golangci-lint.run/) ![GitHub License](https://img.shields.io/github/license/nemirlev/zenmoney-export) ![Go Version](https://img.shields.io/github/go-mod/go-version/nemirlev/zenmoney-export) ![Latest Release](https://img.shields.io/github/v/release/nemirlev/zenmoney-export) ![Docker Pulls](https://img.shields.io/docker/pulls/nemirlev/zenexport) ![Docker Image Size](https://img.shields.io/docker/image-size/nemirlev/zenexport) [![codecov](https://codecov.io/gh/nemirlev/zenmoney-export/graph/badge.svg?token=WOGJKM2YV0)](https://codecov.io/gh/nemirlev/zenmoney-export)
+[![CI](https://github.com/pryid/zenmoney-export/actions/workflows/ci.yml/badge.svg)](https://github.com/pryid/zenmoney-export/actions/workflows/ci.yml) [![MCP Server](https://img.shields.io/badge/MCP-read--only-7C3AED)](doc/mcp.md) ![GitHub License](https://img.shields.io/github/license/pryid/zenmoney-export) ![Go Version](https://img.shields.io/github/go-mod/go-version/pryid/zenmoney-export) ![Latest Release](https://img.shields.io/github/v/release/pryid/zenmoney-export)
 
 ZenMoney Export is a tool designed to export and sync data from the personal finance management
 service [ZenMoney](https://zenmoney.ru/) to your own database.
@@ -218,16 +218,21 @@ go test ./...
 
 ### Linting
 
-Linting uses [golangci-lint](https://golangci-lint.run/) v2 with a dedicated module (`golangci-lint.mod`) so the main `go.mod` stays clean. Config: [.golangci.yml](.golangci.yml).
-
-```bash
-make lint        # run linter
-make lint-fix    # run linter with auto-fix
-```
+Linting uses [golangci-lint](https://golangci-lint.run/) v2 and [.golangci.yml](.golangci.yml).
+Run `golangci-lint run ./...` locally. CI checks changes against the push or pull-request base;
+the coverage report is available as a GitHub Actions artifact.
 
 ## Releasing
 
 [Release Please](https://github.com/googleapis/release-please) maintains a release pull request from conventional commits merged into `main`. Merging that pull request creates the version tag and GitHub release, uploads GoReleaser artifacts, and publishes the versioned multi-architecture container image with Podman.
+
+Images are published to `ghcr.io/pryid/zenmoney-export` with the built-in `GITHUB_TOKEN` (no
+Docker Hub credentials are required). GitHub Packages creates new packages private by default;
+make the package public in its settings if anonymous pulls are required. For a private package,
+run `podman login ghcr.io` using a GitHub token with package read access before pulling. Set
+`ZENEXPORT_IMAGE` to `ghcr.io/pryid/zenmoney-export:latest` and `ZENEXPORT_PULL_POLICY=always` to
+use the published image. Enable GitHub Actions and allow it to create pull requests in the repository
+settings.
 
 Configure a repository secret named `RELEASE_PLEASE_TOKEN` with a personal access token if Release Please pull requests must trigger CI workflows. Without it, the workflow falls back to `GITHUB_TOKEN` and can still maintain releases, but GitHub does not start new workflow runs for events created by that token.
 

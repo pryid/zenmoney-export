@@ -8,6 +8,7 @@ on:
       - 'release/**'
     tags-ignore:
       - 'v*'
+  workflow_dispatch:
   pull_request:
     branches:
       - main
@@ -24,6 +25,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -37,10 +40,21 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Select lint base
+        id: lint-base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "$BASE_SHA" || "$BASE_SHA" =~ ^0+$ ]]; then
+            BASE_SHA=$(git rev-parse HEAD^)
+          fi
+          echo "sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: latest
+          args: --new-from-rev=${{ steps.lint-base.outputs.sha }}
 
   test:
     name: Test
@@ -63,13 +77,12 @@ jobs:
       - name: Run tests
         run: go test -v -race -coverprofile=coverage.out ./...
 
-      - name: Upload coverage to Codecov
-        if: matrix.go == '1.27'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: "./coverage.out"
-          fail_ci_if_error: false
+          name: go-coverage
+          path: coverage.out
+          if-no-files-found: error
 
   postgres-compatibility:
     name: PostgreSQL ${{ matrix.postgres }} compatibility

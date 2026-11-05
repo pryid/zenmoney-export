@@ -80,6 +80,7 @@ jobs:
             runner: ubuntu-24.04-arm
     permissions:
       contents: read
+      packages: write
     steps:
       - name: Checkout release tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -91,14 +92,15 @@ jobs:
 
       - name: Build and push architecture image
         env:
-          REGISTRY_USER: ${{ secrets.DOCKER_HUB_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
           ARCH: ${{ matrix.arch }}
         run: |
-          printf '%s' "$REGISTRY_PASSWORD" | podman login --username "$REGISTRY_USER" --password-stdin docker.io
-          image="docker.io/nemirlev/zenexport:${RELEASE_TAG}-${ARCH}"
-          podman build -f podman/Containerfile -t "$image" .
+          printf '%s' "$REGISTRY_PASSWORD" | podman login --username "$REGISTRY_USER" --password-stdin ghcr.io
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${RELEASE_TAG}-${ARCH}"
+          podman build --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            -f podman/Containerfile -t "$image" .
           podman push "$image"
 
   image-manifest:
@@ -108,19 +110,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: write
     steps:
       - name: Install Podman
         run: sudo apt-get update && sudo apt-get install -y podman
 
       - name: Publish manifest
         env:
-          REGISTRY_USER: ${{ secrets.DOCKER_HUB_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          printf '%s' "$REGISTRY_PASSWORD" | podman login --username "$REGISTRY_USER" --password-stdin docker.io
+          printf '%s' "$REGISTRY_PASSWORD" | podman login --username "$REGISTRY_USER" --password-stdin ghcr.io
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
           podman manifest create zenexport-release
-          podman manifest add zenexport-release "docker://docker.io/nemirlev/zenexport:${RELEASE_TAG}-amd64"
-          podman manifest add zenexport-release "docker://docker.io/nemirlev/zenexport:${RELEASE_TAG}-arm64"
-          podman manifest push --all zenexport-release "docker://docker.io/nemirlev/zenexport:${RELEASE_TAG}"
-          podman manifest push --all zenexport-release docker://docker.io/nemirlev/zenexport:latest
+          podman manifest add zenexport-release "docker://${image}:${RELEASE_TAG}-amd64"
+          podman manifest add zenexport-release "docker://${image}:${RELEASE_TAG}-arm64"
+          podman manifest push --all zenexport-release "docker://${image}:${RELEASE_TAG}"
+          podman manifest push --all zenexport-release "docker://${image}:latest"
