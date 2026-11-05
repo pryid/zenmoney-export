@@ -8,6 +8,19 @@
 ### 🐛 Bug Fixes
 
 - Upgrades Go version in Docker build image (#22)
+## [2.4.0](https://github.com/pryid/zenmoney-export/compare/v2.3.0...v2.4.0) (2026-11-05)
+
+
+### 🚀 Features
+
+* fetch receipt items from ZenMoney ([f1266af](https://github.com/pryid/zenmoney-export/commit/f1266afa450e9962f89aed82c2bb6e2d36cff99f))
+
+
+### 🐛 Bug Fixes
+
+* continue receipt import after server errors ([43f2ed3](https://github.com/pryid/zenmoney-export/commit/43f2ed3d5e30a5ac69fac5dc880d993b2272e584))
+* prevent inherited host proxy from breaking sync ([2fa9d24](https://github.com/pryid/zenmoney-export/commit/2fa9d2467ff4d7703167e73a4e339319de8e6705))
+
 ## [2.3.0](https://github.com/pryid/zenmoney-export/compare/v2.2.1...v2.3.0) (2026-11-05)
 
 
