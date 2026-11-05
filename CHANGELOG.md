@@ -8,6 +8,18 @@
 ### 🐛 Bug Fixes
 
 - Upgrades Go version in Docker build image (#22)
+## [2.3.0](https://github.com/pryid/zenmoney-export/compare/v2.2.1...v2.3.0) (2026-11-05)
+
+
+### 🚀 Features
+
+* migrate container workflows to Podman ([b9523fc](https://github.com/pryid/zenmoney-export/commit/b9523fcbf3f887c143808343c3d759a4906dc94c))
+
+
+### 👷 Continuous Integration
+
+* configure workflows for fork and GHCR ([e30b062](https://github.com/pryid/zenmoney-export/commit/e30b062132b4ff1ced860cd21b3745b6f8807852))
+
 ## [2.2.1](https://github.com/nemirlev/zenmoney-export/compare/v2.2.0...v2.2.1) (2026-08-25)
 
 
