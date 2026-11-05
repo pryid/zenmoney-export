@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS receipt_item;
+DROP TABLE IF EXISTS receipt;

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+env_file=${ZENEXPORT_ENV_FILE:-"$root/podman/.env"}
+project=${ZENEXPORT_PROJECT_NAME:-zenexport}
+[ -f "$env_file" ] || { echo "Environment file not found: $env_file" >&2; exit 1; }
+exec podman-compose -p "$project" --env-file "$env_file" \
+    -f "$root/podman/compose.yml" run -T --rm --no-deps \
+    --entrypoint /app/zenreceipts app "$@"

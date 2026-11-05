@@ -117,6 +117,46 @@ Now app supports the following commands:
 
 - `sync`: Synchronize data from ZenMoney to your database.
 
+## Receipt items
+
+ZenMoney's transaction sync stores receipt QR codes, but not their items. The optional `zenreceipts`
+command uses the same ZenMoney token to request receipt details from the undocumented
+`/parse_qr_code/` endpoint and saves successful responses and line items in PostgreSQL. Receipt data
+is sent to ZenMoney; no separate receipt-provider account is required. The endpoint is used by the
+mobile app but is not part of the documented sync API, so availability and access may change.
+
+After updating the checkout, rebuild the image and run the migrations before fetching:
+
+```bash
+podman-compose -p zenexport --env-file podman/.env -f podman/compose.yml build app
+./podman/up
+```
+
+Start with a small batch, then fetch the rest:
+
+```bash
+./podman/receipts fetch --limit 5
+./podman/receipts fetch
+```
+
+The default interval is one second between requests; `--interval 2s` makes it longer. Identical QR
+codes are requested once, successful receipts are skipped on future runs, and each response is saved
+atomically. Interrupting the command leaves already saved results in place. A receipt with no items
+is marked unavailable and retried on the next run. Network or HTTP errors stop the run so it can be
+resumed later. Some receipts may never be available or may contain no item details.
+
+Export all saved receipt items, one row per item and without duplicating receipts shared by several
+transactions:
+
+```bash
+./podman/receipts export > receipt_items.csv
+```
+
+The CSV contains receipt ID, date, merchant, position, name, quantity, price, and amount. Database
+users can also query `receipt` and `receipt_item` directly, joining `receipt.qr_code` to
+`transaction.qr_code`. Receipt responses and exported CSV files contain sensitive purchase data.
+The command is separate from normal transaction synchronization; rerun it to fetch new receipts.
+
 ## ZenMoney MCP (read-only)
 
 `zenmcp` lets MCP-compatible AI clients analyze the data previously synchronized by `zenexport`.

@@ -10,7 +10,8 @@ RUN go mod download
 COPY . .
 
 # Собираем статически скомпилированный бинарник
-RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o zenexport main.go
+RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o zenexport main.go && \
+    CGO_ENABLED=0 go build -ldflags="-w -s" -o zenreceipts ./cmd/zenreceipts
 
 # Используем минимальный образ с зафиксированной версией
 FROM docker.io/library/alpine:3.23.3
@@ -21,6 +22,7 @@ RUN apk --no-cache add ca-certificates && \
 
 # Копируем бинарник из предыдущего этапа
 COPY --from=builder /build/zenexport /app/zenexport
+COPY --from=builder /build/zenreceipts /app/zenreceipts
 
 # Используем непривилегированного пользователя
 USER appuser

@@ -147,6 +147,16 @@ jobs:
             -f podman/compose.yml -f podman/compose.mcp.yml logs
           exit 1
 
+      - name: Check receipt export
+        env:
+          ZENEXPORT_ENV_FILE: ${{ runner.temp }}/zenexport.env
+          ZENEXPORT_PROJECT_NAME: zenexport-ci
+        run: |
+          ./podman/receipts export > "$RUNNER_TEMP/receipt-items.csv"
+          test "$(head -n 1 "$RUNNER_TEMP/receipt-items.csv")" = \
+            'receipt_id,date,payee,position,name,quantity,price,amount'
+          ./podman/receipts fetch --limit 1
+
       - name: Check exporter proxy configuration
         env:
           ZENEXPORT_ENV_FILE: ${{ runner.temp }}/zenexport.env
